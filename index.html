@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Why Do Deep Passes Fail?</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,700;1,900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body { font-family: 'Inter', sans-serif; background: #000; color: #fff; }
+
+    /* ===== HERO: TWO-COLUMN ===== */
+    .hero {
+      position: relative;
+      min-height: 100vh;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .hero-bg { position: absolute; inset: 0; }
+    .hero-bg img { width: 100%; height: 100%; object-fit: cover; }
+    .hero-overlay {
+      position: absolute; inset: 0;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.55) 50%, rgba(0,0,0,0.96) 100%);
+    }
+    .hero-sides {
+      position: absolute; inset: 0;
+      background: linear-gradient(to right, rgba(0,0,0,0.5), transparent 30%, transparent 70%, rgba(0,0,0,0.5));
+    }
+    .hero-top-bar {
+      position: absolute; top: 0; left: 0; right: 0; height: 4px;
+      background: linear-gradient(to right, transparent, #dc2626, transparent);
+    }
+    .hero-content {
+      position: relative; z-index: 10;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 72px;
+      align-items: center;
+      max-width: 1280px;
+      width: 100%;
+      padding: 100px 56px;
+    }
+    @media(max-width: 960px) {
+      .hero-content {
+        grid-template-columns: 1fr;
+        gap: 44px;
+        padding: 80px 24px 100px;
+      }
+      .hero-left { text-align: center; }
+      .hero-meta { justify-content: center; }
+    }
+    .hero-left { text-align: left; }
+    .hero-right {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Hero text */
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 10px;
+      margin-bottom: 28px;
+      border-left: 4px solid #dc2626; padding-left: 14px;
+      letter-spacing: 0.2em; text-transform: uppercase;
+      font-size: 0.78rem; color: #ef4444;
+    }
+    .hero-title {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-style: italic; font-weight: 900;
+      line-height: 1.05; margin-bottom: 28px;
+      font-size: clamp(2.8rem, 5.5vw, 5.5rem);
+    }
+    .hero-title .white { display: block; color: #fff; }
+    .hero-title .red   { display: block; color: #ef4444; }
+    .hero-sub {
+      font-size: clamp(0.95rem, 1.8vw, 1.15rem);
+      color: #d4d4d8; margin: 0 0 36px; line-height: 1.7;
+      max-width: 480px;
+    }
+    @media(max-width: 960px) { .hero-sub { margin: 0 auto 36px; } }
+    .hero-sub .hl { color: #fff; border-bottom: 2px solid #ef4444; }
+    .hero-meta {
+      display: flex; align-items: center;
+      gap: 14px; color: #71717a; font-size: 0.8rem;
+    }
+    .dot { width: 4px; height: 4px; border-radius: 50%; background: #3f3f46; }
+
+    /* ===== FILTER PANEL (in hero-right) ===== */
+    .panel {
+      background: rgba(10,10,12,0.55); backdrop-filter: blur(28px);
+      border: 1px solid rgba(255,255,255,.12); border-radius: 20px;
+      padding: 30px 28px 28px;
+      width: 100%; max-width: 440px;
+    }
+    .panel-eyebrow {
+      display: flex; align-items: center; gap: 8px;
+      font-size: .68rem; text-transform: uppercase; letter-spacing: .2em;
+      color: rgba(255,255,255,.4); margin-bottom: 22px;
+    }
+    .pulse-dot { width: 7px; height: 7px; border-radius: 50%; background: #22d3ee; animation: pdot 1.5s infinite; flex-shrink: 0; }
+    @keyframes pdot { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .filters-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; margin-bottom: 18px; }
+    @media(max-width: 480px) { .filters-grid { grid-template-columns: 1fr 1fr; } }
+    .fg label {
+      display: block; font-size: .63rem; text-transform: uppercase;
+      letter-spacing: .15em; color: rgba(255,255,255,.38); margin-bottom: 7px;
+    }
+    .fg select {
+      width: 100%; background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.13); border-radius: 9px;
+      padding: 9px 28px 9px 11px; color: #fff; font-size: .86rem;
+      cursor: pointer; appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23ffffff40' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 10px center;
+      transition: border-color .2s, background .2s;
+    }
+    .fg select:focus { outline: none; border-color: #22d3ee; background-color: rgba(255,255,255,.1); }
+    .adv { border-top: 1px solid rgba(255,255,255,.09); padding-top: 16px; margin-bottom: 18px; }
+    .adv > span {
+      display: block; font-size: .63rem; text-transform: uppercase;
+      letter-spacing: .15em; color: rgba(255,255,255,.38); margin-bottom: 10px;
+    }
+    .toggles { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tbtn {
+      padding: 6px 14px; border-radius: 50px; font-size: .79rem; cursor: pointer;
+      border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06);
+      color: rgba(255,255,255,.58); transition: all .2s; font-family: inherit;
+    }
+    .tbtn:hover { color: #fff; border-color: rgba(255,255,255,.32); }
+    .tbtn.on { background: rgba(34,211,238,.14); border-color: rgba(34,211,238,.48); color: #22d3ee; }
+    .panel-footer { display: flex; flex-direction: column; gap: 9px; }
+    .go-btn {
+      width: 100%; padding: 14px 24px;
+      background: linear-gradient(135deg, #22d3ee, #ef4444, #dc2626);
+      border: none; border-radius: 12px; color: #fff;
+      font-size: .9rem; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; cursor: pointer; font-family: inherit;
+      transition: transform .18s, box-shadow .18s;
+      text-align: center;
+    }
+    .go-btn:hover { transform: scale(1.02); box-shadow: 0 0 40px rgba(239,68,68,.38); }
+    .rst-btn {
+      width: 100%; padding: 10px 18px; background: transparent;
+      border: 1px solid rgba(255,255,255,.12); border-radius: 10px;
+      color: rgba(255,255,255,.35); font-size: .78rem; cursor: pointer;
+      font-family: inherit; transition: all .2s; text-align: center;
+    }
+    .rst-btn:hover { color: #fff; border-color: rgba(255,255,255,.38); }
+
+    /* Scroll hint */
+    .scroll-hint {
+      position: absolute; bottom: 36px; left: 50%; transform: translateX(-50%);
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      color: #52525b; font-size: 0.65rem; letter-spacing: 0.2em; text-transform: uppercase;
+    }
+    .bounce { animation: bounce 1.6s infinite; color: #ef4444; }
+    @keyframes bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(9px)} }
+
+    /* ===== FINDING ===== */
+    .finding {
+      position: relative; min-height: 100vh;
+      background: linear-gradient(to bottom, #000, #09090b, #000);
+      padding: 100px 24px; overflow: hidden;
+    }
+    .dot-bg {
+      position: absolute; inset: 0; opacity: 0.08;
+      background-image: radial-gradient(circle at 2px 2px, #ef4444 1px, transparent 0);
+      background-size: 40px 40px;
+    }
+    .finding-inner { position: relative; z-index: 10; max-width: 1200px; margin: 0 auto; }
+    .sec-eyebrow {
+      display: inline-block; border-left: 4px solid #22d3ee;
+      padding-left: 12px; letter-spacing: 0.2em;
+      text-transform: uppercase; font-size: 0.78rem;
+      color: #22d3ee; margin-bottom: 14px;
+    }
+    .sec-title {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-style: italic; font-size: clamp(2rem, 5vw, 3.5rem);
+      color: #fff; margin-bottom: 64px;
+    }
+    .sec-title .red { color: #ef4444; }
+    .finding-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 64px; align-items: center;
+    }
+    @media(max-width:900px){ .finding-grid{grid-template-columns:1fr} }
+    .chart-box {
+      background: rgba(24,24,27,0.5); backdrop-filter: blur(12px);
+      border: 1px solid #27272a; border-radius: 14px; padding: 32px;
+    }
+    .chart-box-label { font-size: 0.72rem; text-transform:uppercase; letter-spacing:.15em; color:#22d3ee; margin-bottom:6px; }
+    .chart-box-sub { font-size: 0.82rem; color: #71717a; margin-bottom: 24px; }
+    .chart-legend { display:flex; gap:24px; margin-top:18px; }
+    .leg { display:flex; align-items:center; gap:8px; font-size:0.78rem; color:#71717a; }
+    .leg-dot { width:12px; height:12px; border-radius:3px; }
+    .big-stat { position: relative; }
+    .big-glow {
+      position:absolute; inset:-16px;
+      background:rgba(239,68,68,0.1); filter:blur(48px); border-radius:50%;
+    }
+    .big-num {
+      position: relative;
+      font-family: 'Playfair Display', Georgia, serif;
+      font-style: italic; font-size: clamp(6rem, 16vw, 12rem);
+      line-height: 1; color: #ef4444; letter-spacing: -0.04em; margin-bottom: 14px;
+    }
+    .big-label { font-size: clamp(1.1rem, 2.5vw, 1.7rem); color: #fff; line-height:1.4; margin-bottom:32px; }
+    .big-label .hl { border-bottom: 4px solid #ef4444; }
+    .explainer { padding-left: 24px; border-left: 2px solid #27272a; }
+    .explainer p { color: #d4d4d8; font-size:0.95rem; line-height:1.75; margin-bottom:12px; }
+    .explainer p:last-of-type { color:#71717a; }
+    .mini-stats { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:24px; padding-top:24px; border-top:1px solid #27272a; }
+    .mini-val { font-size:1.8rem; color:#22d3ee; font-weight:700; margin-bottom:4px; }
+    .mini-lbl { font-size:0.68rem; text-transform:uppercase; letter-spacing:.15em; color:#71717a; }
+    .bottom-rule { position:absolute; bottom:0; left:0; right:0; height:1px; background:linear-gradient(to right,transparent,#dc2626,transparent); }
+
+    /* ===== RESULTS ===== */
+    .results { background: #000; padding: 80px 24px 100px; }
+    .results-inner { max-width: 860px; margin: 0 auto; }
+    .res-header {
+      display: flex; align-items: baseline; justify-content: space-between;
+      flex-wrap: wrap; gap: 12px; margin-bottom: 40px;
+    }
+    .res-header h2 {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-style: italic; font-size: 2.2rem; color: #fff;
+    }
+    .res-header span { font-size: .82rem; color: #71717a; }
+
+    /* Donut — main takeaway */
+    .donut-box {
+      background: rgba(24,24,27,.6); border: 1px solid #27272a;
+      border-radius: 18px; padding: 32px 32px 28px;
+      margin-bottom: 28px; text-align: center;
+    }
+    .box-title {
+      font-size: .7rem; text-transform: uppercase; letter-spacing: .14em;
+      color: #22d3ee; margin-bottom: 24px; text-align: left;
+    }
+    .donut-wrap { max-width: 380px; margin: 0 auto; }
+
+    /* Stat cards */
+    .stats-row { display: grid; grid-template-columns: repeat(5,1fr); gap: 14px; margin-bottom: 28px; }
+    @media(max-width: 680px) { .stats-row { grid-template-columns: repeat(2,1fr); } }
+    .sc { background: rgba(24,24,27,.6); border: 1px solid #27272a; border-radius: 14px; padding: 22px 14px; text-align: center; }
+    .sv {
+      font-size: 1.6rem; font-weight: 800; margin-bottom: 5px;
+      background: linear-gradient(135deg, #22d3ee, #ef4444);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .sl { font-size: .67rem; text-transform: uppercase; letter-spacing: .1em; color: #71717a; }
+
+    /* Collapsible plays */
+    .plays-toggle-btn {
+      width: 100%; padding: 15px 24px;
+      background: rgba(24,24,27,.6); border: 1px solid #27272a;
+      border-radius: 14px; color: #71717a;
+      font-size: .88rem; font-family: inherit;
+      cursor: pointer; transition: all .2s;
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      letter-spacing: .04em;
+    }
+    .plays-toggle-btn:hover { border-color: rgba(34,211,238,.35); color: #e4e4e7; }
+    .plays-toggle-btn.open {
+      border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+      border-bottom-color: transparent;
+      border-color: rgba(34,211,238,.25); color: #22d3ee;
+    }
+    .plays-toggle-icon { transition: transform .25s; }
+    .plays-toggle-btn.open .plays-toggle-icon { transform: rotate(180deg); }
+    .plays-list-wrapper {
+      display: none;
+      background: rgba(24,24,27,.6); border: 1px solid rgba(34,211,238,.2);
+      border-top: none; border-radius: 0 0 14px 14px;
+      padding: 20px;
+    }
+    .plays-list-wrapper.open { display: block; }
+    .pi { background: rgba(0,0,0,.45); border: 1px solid #27272a; border-radius: 10px; padding: 16px; margin-bottom: 11px; transition: border-color .2s; }
+    .pi:last-child { margin-bottom: 0; }
+    .pi:hover { border-color: rgba(34,211,238,.3); }
+    .pm { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 7px; font-size: .76rem; }
+    .pm span { color: #71717a; }
+    .pm strong { color: #22d3ee; }
+    .rb { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: .7rem; font-weight: 700; }
+    .rb-C  { background: rgba(34,211,238,.15); color: #22d3ee; }
+    .rb-I  { background: rgba(161,161,170,.15); color: #a1a1aa; }
+    .rb-IN { background: rgba(239,68,68,.15); color: #fca5a5; }
+    .pd { font-size: .86rem; color: #d4d4d8; line-height: 1.65; }
+    .nope { text-align: center; padding: 48px; color: #71717a; }
+
+    footer { text-align: center; padding: 40px; border-top: 1px solid #27272a; color: #71717a; font-size: .82rem; }
+    footer a { color: #22d3ee; text-decoration: none; }
+  </style>
+</head>
+<body>
+
+<!-- ===== HERO: Two-column above the fold ===== -->
+<section class="hero">
+  <div class="hero-bg">
+    <img src="https://images.unsplash.com/photo-1539297991909-a76b23f3936c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxMZXZpcyUyMFN0YWRpdW0lMjBhZXJpYWx8ZW58MXx8fHwxNzYzMzI1MDg5fDA&ixlib=rb-4.1.0&q=80&w=1080" alt="Stadium aerial">
+    <div class="hero-overlay"></div>
+    <div class="hero-sides"></div>
+  </div>
+  <div class="hero-top-bar"></div>
+
+  <div class="hero-content">
+
+    <!-- LEFT: headline, eyebrow, description -->
+    <div class="hero-left">
+      <div class="eyebrow">Data Investigation</div>
+      <h1 class="hero-title">
+        <span class="white">Why Do</span>
+        <span class="red">Deep Passes</span>
+        <span class="white">Fail?</span>
+      </h1>
+      <p class="hero-sub">
+        I analyzed <span class="hl">18,000+ NFL plays</span> to find out — and the answer surprised me. Use the filters to explore the data yourself.
+      </p>
+      <div class="hero-meta">
+        <span style="text-transform:uppercase;letter-spacing:.1em">By Earl</span>
+        <span class="dot"></span>
+        <span>NFL Big Data Bowl 2024</span>
+        <span class="dot"></span>
+        <span>2023 Season</span>
+      </div>
+    </div>
+
+    <!-- RIGHT: filter panel, centered and balanced -->
+    <div class="hero-right">
+      <div class="panel">
+        <div class="panel-eyebrow">
+          <span class="pulse-dot"></span>
+          Interactive Filters
+        </div>
+
+        <div class="filters-grid">
+          <div class="fg">
+            <label>Coverage</label>
+            <select id="coverage">
+              <option value="all">All</option>
+              <option value="COVER_0_MAN">Cover 0</option>
+              <option value="COVER_1_MAN">Cover 1</option>
+              <option value="COVER_2_MAN">Cover 2 Man</option>
+              <option value="COVER_2_ZONE">Cover 2 Zone</option>
+              <option value="COVER_3_ZONE">Cover 3</option>
+              <option value="COVER_4_ZONE">Cover 4</option>
+              <option value="COVER_6_ZONE">Cover 6</option>
+              <option value="PREVENT">Prevent</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Down</label>
+            <select id="down">
+              <option value="all">Any</option>
+              <option value="1">1st</option>
+              <option value="2">2nd</option>
+              <option value="3">3rd</option>
+              <option value="4">4th</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label>Distance</label>
+            <select id="distance">
+              <option value="all">Any</option>
+              <option value="short">Short (1–10)</option>
+              <option value="medium">Med (11–20)</option>
+              <option value="deep">Deep (20+)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="adv">
+          <span>Situational Filters</span>
+          <div class="toggles">
+            <button class="tbtn" id="btn-redzone" data-on="false">🔴 Red Zone</button>
+            <button class="tbtn" id="btn-playaction" data-on="false">🎭 Play Action</button>
+            <button class="tbtn" id="btn-shotgun" data-on="false">🏈 Shotgun</button>
+          </div>
+        </div>
+
+        <div class="panel-footer">
+          <button class="go-btn" onclick="document.getElementById('results').scrollIntoView({behavior:'smooth'})">
+            Explore the Data →
+          </button>
+          <button class="rst-btn" id="reset">Reset Filters</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="scroll-hint">
+    <span>Scroll to explore</span>
+    <div class="bounce">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+  </div>
+</section>
+
+<!-- ===== FINDING ===== -->
+<section class="finding">
+  <div class="dot-bg"></div>
+  <div class="finding-inner">
+    <span class="sec-eyebrow">Finding #1</span>
+    <h2 class="sec-title">The Coverage That <span class="red">Kills</span> Deep Shots</h2>
+    <div class="finding-grid">
+      <div class="chart-box">
+        <div class="chart-box-label">Incompletion Rate by Coverage Type</div>
+        <div class="chart-box-sub">Deep passes (20+ yards), 2023 season</div>
+        <canvas id="findingChart" height="280"></canvas>
+        <div class="chart-legend">
+          <div class="leg"><div class="leg-dot" style="background:#ef4444"></div>Cover 2 (Highest)</div>
+          <div class="leg"><div class="leg-dot" style="background:#22d3ee"></div>Other Coverages</div>
+        </div>
+      </div>
+      <div class="big-stat">
+        <div class="big-glow"></div>
+        <div class="big-num">67%</div>
+        <div class="big-label">of deep balls vs Cover 2 are <span class="hl">incomplete</span></div>
+        <div class="explainer">
+          <p>Cover 2 defense features two deep safeties splitting the field in half, creating a protective shell that collapses passing windows downfield.</p>
+          <p>When QBs attempt deep shots against this coverage, they're forced to thread the needle between zone defenders — resulting in the highest incompletion rate across all defensive schemes.</p>
+          <div class="mini-stats">
+            <div><div class="mini-val">-19%</div><div class="mini-lbl">vs Cover 1</div></div>
+            <div><div class="mini-val" id="deep-count">--</div><div class="mini-lbl">Plays analyzed</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="bottom-rule"></div>
+</section>
+
+<!-- ===== RESULTS ===== -->
+<section class="results" id="results">
+  <div class="results-inner">
+    <div class="res-header">
+      <h2>Results</h2>
+      <span id="res-label">Loading data...</span>
+    </div>
+
+    <!-- 1. Donut chart — main takeaway, up top -->
+    <div class="donut-box">
+      <div class="box-title">Completion Breakdown</div>
+      <div class="donut-wrap">
+        <canvas id="donutChart"></canvas>
+      </div>
+    </div>
+
+    <!-- 2. Stat cards directly below donut -->
+    <div class="stats-row">
+      <div class="sc"><div class="sv" id="s-plays">--</div><div class="sl">Total Plays</div></div>
+      <div class="sc"><div class="sv" id="s-comp">--%</div><div class="sl">Completion %</div></div>
+      <div class="sc"><div class="sv" id="s-yards">--</div><div class="sl">Avg Yards</div></div>
+      <div class="sc"><div class="sv" id="s-len">--</div><div class="sl">Avg Pass Length</div></div>
+      <div class="sc"><div class="sv" id="s-epa">--</div><div class="sl">Avg EPA</div></div>
+    </div>
+
+    <!-- 3. Sample plays — collapsible, collapsed by default -->
+    <div class="plays-section">
+      <button class="plays-toggle-btn" id="plays-toggle">
+        <svg class="plays-toggle-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+        <span id="plays-toggle-label">Show Sample Plays</span>
+      </button>
+      <div class="plays-list-wrapper" id="plays-list-wrapper">
+        <div id="plays-list"></div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<footer>
+  <p>Built by Earl · <a href="https://www.kaggle.com/competitions/nfl-big-data-bowl-2025" target="_blank">NFL Big Data Bowl 2024 Data</a> · 2023 Season</p>
+</footer>
+
+<script>
+  let allPlays = [], donut = null;
+
+  // ===== FINDING CHART =====
+  // Disable datalabels plugin for this bar chart (it auto-registers globally)
+  new Chart(document.getElementById('findingChart').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: ['Cover 2', 'Cover 3', 'Man', 'Cover 1'],
+      datasets: [{
+        data: [67, 54, 51, 48],
+        backgroundColor: ['#ef4444','#22d3ee','#22d3ee','#22d3ee'],
+        borderRadius: 8, borderSkipped: false
+      }]
+    },
+    options: {
+      indexAxis: 'y', responsive: true,
+      plugins: {
+        legend: { display: false },
+        datalabels: { display: false }
+      },
+      scales: {
+        x: { grid:{color:'#27272a'}, ticks:{color:'#a1a1aa', callback: v => v+'%'}, max: 80 },
+        y: { grid:{display:false}, ticks:{color:'#a1a1aa'} }
+      }
+    }
+  });
+
+  // ===== DATA LOAD =====
+  async function loadData() {
+    try {
+      const res = await fetch('data.json');
+      allPlays = await res.json();
+      const dc = allPlays.filter(p => p.coverage_type === 'COVER_2_ZONE' && p.pass_length > 20);
+      document.getElementById('deep-count').textContent = dc.length.toLocaleString();
+      setupListeners();
+      applyFilters();
+    } catch(e) {
+      document.getElementById('plays-list').innerHTML = '<p class="nope">Error loading data.json — make sure it\'s in the same folder.</p>';
+      document.getElementById('res-label').textContent = 'Error loading data';
+    }
+  }
+
+  function getF() {
+    return {
+      coverage: document.getElementById('coverage').value,
+      down:     document.getElementById('down').value,
+      distance: document.getElementById('distance').value,
+      rz: document.getElementById('btn-redzone').dataset.on === 'true',
+      pa: document.getElementById('btn-playaction').dataset.on === 'true',
+      sg: document.getElementById('btn-shotgun').dataset.on === 'true',
+    };
+  }
+
+  function match(p, f) {
+    if (f.coverage !== 'all' && p.coverage_type !== f.coverage) return false;
+    if (f.down !== 'all' && p.down !== parseInt(f.down)) return false;
+    if (f.rz && !p.is_red_zone) return false;
+    if (f.pa && !p.play_action) return false;
+    if (f.sg && p.offense_formation !== 'SHOTGUN') return false;
+    if (f.distance !== 'all') {
+      const l = p.pass_length;
+      if (f.distance === 'short'  && !(l >= 1 && l <= 10)) return false;
+      if (f.distance === 'medium' && !(l > 10 && l <= 20)) return false;
+      if (f.distance === 'deep'   && !(l > 20)) return false;
+    }
+    return true;
+  }
+
+  function applyFilters() {
+    const f = getF();
+    const filtered = allPlays.filter(p => match(p, f));
+    renderStats(filtered);
+    renderDonut(filtered);
+    renderPlays(filtered);
+  }
+
+  // ===== STATS =====
+  function renderStats(plays) {
+    const n  = plays.length;
+    const c  = plays.filter(p => p.pass_result === 'C').length;
+    const ep = plays.filter(p => p.epa !== null);
+    document.getElementById('s-plays').textContent = n.toLocaleString();
+    document.getElementById('s-comp').textContent  = n > 0 ? (c/n*100).toFixed(1)+'%' : '--%';
+    document.getElementById('s-yards').textContent = n > 0 ? (plays.reduce((s,p)=>s+p.yards_gained,0)/n).toFixed(1)+' yds' : '--';
+    document.getElementById('s-len').textContent   = n > 0 ? (plays.reduce((s,p)=>s+p.pass_length,0)/n).toFixed(1)+' yds' : '--';
+    document.getElementById('s-epa').textContent   = ep.length > 0 ? (ep.reduce((s,p)=>s+p.epa,0)/ep.length).toFixed(2) : '--';
+    document.getElementById('res-label').textContent = n > 0 ? `${n.toLocaleString()} plays match your filters` : 'No plays match';
+  }
+
+  // ===== DONUT CHART with slice percentage labels =====
+  function renderDonut(plays) {
+    const c   = plays.filter(p => p.pass_result === 'C').length;
+    const i   = plays.filter(p => p.pass_result === 'I').length;
+    const int = plays.filter(p => p.pass_result === 'IN').length;
+    const total = c + i + int;
+
+    const ctx = document.getElementById('donutChart').getContext('2d');
+    if (donut) donut.destroy();
+
+    donut = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Complete', 'Incomplete', 'Interception'],
+        datasets: [{
+          data: [c, i, int],
+          backgroundColor: [
+            'rgba(34,211,238,.85)',
+            'rgba(161,161,170,.55)',
+            'rgba(239,68,68,.85)'
+          ],
+          borderColor: '#000',
+          borderWidth: 3,
+          hoverOffset: 10
+        }]
+      },
+      options: {
+        responsive: true,
+        cutout: '62%',
+        plugins: {
+          datalabels: {
+            color: '#fff',
+            font: { weight: '700', size: 13 },
+            textShadowBlur: 6,
+            textShadowColor: 'rgba(0,0,0,0.9)',
+            formatter: (value) => {
+              if (!total || !value) return '';
+              return ((value / total) * 100).toFixed(1) + '%';
+            },
+            display: (ctx) => {
+              const value = ctx.dataset.data[ctx.dataIndex];
+              // Hide label if slice is < 4% — too small to read cleanly
+              return total > 0 && value > 0 && (value / total) >= 0.04;
+            }
+          },
+          legend: {
+            position: 'bottom',
+            labels: { color: '#71717a', padding: 20, font: { size: 12 } }
+          },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                const t = ctx.dataset.data.reduce((a,b) => a+b, 0);
+                return ` ${ctx.label}: ${ctx.parsed.toLocaleString()} (${t > 0 ? ((ctx.parsed/t)*100).toFixed(1) : 0}%)`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // ===== PLAYS LIST (rendered to the collapsible panel) =====
+  function renderPlays(plays) {
+    const el = document.getElementById('plays-list');
+    if (!plays.length) {
+      el.innerHTML = '<p class="nope">No plays match your filters.</p>';
+      return;
+    }
+    const lbl = { C: 'Complete', I: 'Incomplete', IN: 'Interception' };
+    el.innerHTML = plays.slice(0, 15).map(p => {
+      const r   = p.pass_result || 'I';
+      const cov = p.coverage_type.replace(/_/g,' ').replace('ZONE','').replace('MAN','').trim();
+      return `<div class="pi">
+        <div class="pm">
+          <span class="rb rb-${r}">${lbl[r] || r}</span>
+          <span><strong>${p.possession_team}</strong></span>
+          <span>Dn: <strong>${p.down}</strong></span>
+          <span><strong>${cov}</strong></span>
+          <span><strong>${Math.round(p.pass_length)} yds</strong></span>
+          ${p.is_red_zone ? '<span style="color:#fca5a5">🔴 RZ</span>' : ''}
+          ${p.play_action ? '<span>🎭 PA</span>' : ''}
+        </div>
+        <p class="pd">${p.play_description}</p>
+      </div>`;
+    }).join('');
+  }
+
+  // ===== EVENT LISTENERS =====
+  function setupListeners() {
+    ['coverage','down','distance'].forEach(id =>
+      document.getElementById(id).addEventListener('change', applyFilters)
+    );
+    ['btn-redzone','btn-playaction','btn-shotgun'].forEach(id => {
+      document.getElementById(id).addEventListener('click', e => {
+        const b  = e.currentTarget;
+        const on = b.dataset.on === 'true';
+        b.dataset.on = on ? 'false' : 'true';
+        b.classList.toggle('on', !on);
+        applyFilters();
+      });
+    });
+    document.getElementById('reset').addEventListener('click', () => {
+      ['coverage','down','distance'].forEach(id => document.getElementById(id).value = 'all');
+      ['btn-redzone','btn-playaction','btn-shotgun'].forEach(id => {
+        const b = document.getElementById(id);
+        b.dataset.on = 'false'; b.classList.remove('on');
+      });
+      applyFilters();
+    });
+
+    // Sample plays toggle
+    document.getElementById('plays-toggle').addEventListener('click', () => {
+      const wrapper = document.getElementById('plays-list-wrapper');
+      const btn     = document.getElementById('plays-toggle');
+      const label   = document.getElementById('plays-toggle-label');
+      const isOpen  = wrapper.classList.contains('open');
+      wrapper.classList.toggle('open', !isOpen);
+      btn.classList.toggle('open', !isOpen);
+      label.textContent = isOpen ? 'Show Sample Plays' : 'Hide Sample Plays';
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', loadData);
+</script>
+</body>
+</html>
